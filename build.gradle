@@ -1,0 +1,19 @@
+plugins {
+    id 'java'
+}
+
+group 'net.earthcomputer.jomloptimizer'
+version '1.0-SNAPSHOT'
+
+sourceCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile gradleApi()
+    compile 'org.ow2.asm:asm-debug-all:5.2'
+    testCompile 'junit:junit:4.12'
+    testCompile 'org.joml:joml:1.9.6'
+}

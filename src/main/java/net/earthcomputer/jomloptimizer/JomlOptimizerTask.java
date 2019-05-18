@@ -152,33 +152,41 @@ public class JomlOptimizerTask extends DefaultTask {
                 }
 
                 @Override
+                public FieldVisitor visitField(int access, String name, String desc, String signature, Object value) {
+                    if (modifyJomlItself && JomlClasses.isJomlClass(className)) {
+                        access &= ~(Opcodes.ACC_PROTECTED | Opcodes.ACC_PRIVATE);
+                        access |= Opcodes.ACC_PUBLIC;
+                    }
+                    return super.visitField(access, name, desc, signature, value);
+                }
+
+                @Override
                 protected MethodVisitor createMethodRemapper(MethodVisitor mv) {
                     return new MethodRemapper(mv, remapper) {
                         @Override
                         public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
-                            if (JomlClasses.isJomlClass(owner)) {
-                                if (!modifyJomlItself) {
-                                    mv.visitMethodInsn(opcode == Opcodes.INVOKEINTERFACE ? Opcodes.INVOKEVIRTUAL : opcode, remapper.mapType(owner), name, desc, false);
-                                    Type returnType = Type.getReturnType(desc);
-                                    if (returnType.getSort() == Type.OBJECT && JomlClasses.isConstantClass(returnType.getInternalName())) {
-                                        mv.visitTypeInsn(Opcodes.CHECKCAST, "L" + JomlClasses.getNonConstantClass(returnType.getInternalName()) + ";");
-                                    }
-                                } else {
-                                    if (JomlClasses.isConstantClass(owner)) {
-                                        String nonConstant = JomlClasses.getNonConstantClass(owner);
-                                        if (canUseField(nonConstant, name, desc)) {
-                                            classModified.set(Boolean.TRUE);
-                                            mv.visitFieldInsn(Opcodes.GETFIELD, nonConstant, name, Type.getReturnType(desc).getDescriptor());
-                                        } else {
-                                            super.visitMethodInsn(opcode == Opcodes.INVOKEINTERFACE ? Opcodes.INVOKEVIRTUAL : opcode, owner, name, desc, false);
-                                        }
-                                    } else {
-                                        super.visitMethodInsn(opcode, owner, name, desc, itf);
-                                    }
-                                }
-                            } else {
+                            if (!JomlClasses.isJomlClass(owner)) {
                                 super.visitMethodInsn(opcode, owner, name, desc, itf);
+                                return;
                             }
+
+                            String newOwner = remapper.mapType(owner);
+                            if (canUseField(newOwner, name, desc)) {
+                                classModified.set(true);
+                                mv.visitFieldInsn(Opcodes.GETFIELD, newOwner, name, Type.getReturnType(desc).getDescriptor());
+                                return;
+                            }
+
+                            if (!modifyJomlItself) {
+                                mv.visitMethodInsn(opcode == Opcodes.INVOKEINTERFACE ? Opcodes.INVOKEVIRTUAL : opcode, remapper.mapType(owner), name, desc, false);
+                                Type returnType = Type.getReturnType(desc);
+                                if (returnType.getSort() == Type.OBJECT && JomlClasses.isConstantClass(returnType.getInternalName())) {
+                                    mv.visitTypeInsn(Opcodes.CHECKCAST, "L" + JomlClasses.getNonConstantClass(returnType.getInternalName()) + ";");
+                                }
+                                return;
+                            }
+
+                            super.visitMethodInsn(opcode == Opcodes.INVOKEINTERFACE ? Opcodes.INVOKEVIRTUAL : opcode, owner, name, desc, false);
                         }
 
                         private boolean canUseField(String owner, String name, String desc) {
@@ -186,7 +194,7 @@ public class JomlOptimizerTask extends DefaultTask {
                                 return false;
                             try {
                                 Class<?> clazz = Class.forName(owner.replace('/', '.'));
-                                Field field = clazz.getField(name);
+                                Field field = modifyJomlItself ? clazz.getDeclaredField(name) : clazz.getField(name);
                                 Method getter = clazz.getMethod(name);
                                 return field.getType() == getter.getReturnType();
                             } catch (ReflectiveOperationException e) {

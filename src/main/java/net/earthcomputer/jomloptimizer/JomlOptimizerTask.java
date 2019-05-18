@@ -2,11 +2,7 @@ package net.earthcomputer.jomloptimizer;
 
 import groovy.lang.Reference;
 import org.gradle.api.DefaultTask;
-import org.gradle.api.file.FileCollection;
-import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.InputFiles;
-import org.gradle.api.tasks.OutputDirectory;
-import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.*;
 import org.objectweb.asm.*;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.MethodRemapper;
@@ -25,8 +21,8 @@ import java.util.zip.ZipOutputStream;
 
 public class JomlOptimizerTask extends DefaultTask {
 
-    private FileCollection inputJars;
-    private File outputDir;
+    private File inputJar;
+    private File outputJar;
 
     private boolean removeConstants = false;
     private boolean modifyJomlItself = false;
@@ -36,22 +32,22 @@ public class JomlOptimizerTask extends DefaultTask {
 
     private static final Object LOCK = new Object();
 
-    @InputFiles
-    public FileCollection getInputJars() {
-        return inputJars;
+    @InputFile
+    public File getInputJar() {
+        return inputJar;
     }
 
-    public void setInputJars(FileCollection inputJars) {
-        this.inputJars = inputJars;
+    public void setInputJar(File inputJar) {
+        this.inputJar = inputJar;
     }
 
-    @OutputDirectory
-    public File getOutputDir() {
-        return outputDir;
+    @OutputFile
+    public File getOutputJar() {
+        return outputJar;
     }
 
-    public void setOutputDir(File outputDir) {
-        this.outputDir = outputDir;
+    public void setOutputJar(File outputJar) {
+        this.outputJar = outputJar;
     }
 
     @Input
@@ -81,7 +77,7 @@ public class JomlOptimizerTask extends DefaultTask {
     }
 
     private void readInputsToCache() {
-        inputJars.forEach(jar -> getProject().zipTree(jar).visit(file -> {
+        getProject().zipTree(inputJar).visit(file -> {
             if (file.getName().endsWith(".class")) {
                 try {
                     ClassReader reader = new ClassReader(file.open());
@@ -92,39 +88,37 @@ public class JomlOptimizerTask extends DefaultTask {
                     throw new UncheckedIOException(e);
                 }
             }
-        }));
+        });
     }
 
     private void writeOutputs() {
-        if (!outputDir.isDirectory())
-            outputDir.mkdirs();
+        if (!outputJar.getParentFile().isDirectory())
+            outputJar.getParentFile().mkdirs();
 
-        inputJars.forEach(jar -> {
-            try {
-                ZipOutputStream zipOut = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(new File(outputDir, jar.getName()))));
-                getProject().zipTree(jar).visit(file -> {
-                    try {
-                        zipOut.putNextEntry(new ZipEntry(file.getPath()));
-                        if (!file.isDirectory()) {
-                            if (!file.getName().endsWith(".class") || !modifiedClasses.contains(file.getPath().substring(0, file.getPath().length() - 6))) {
-                                file.copyTo(zipOut);
-                            } else {
-                                ClassWriter writer = new ClassWriter(0);
-                                cachedClasses.get(file.getPath().substring(0, file.getPath().length() - 6)).accept(writer);
-                                zipOut.write(writer.toByteArray());
-                            }
+        try {
+            ZipOutputStream zipOut = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(outputJar)));
+            getProject().zipTree(inputJar).visit(file -> {
+                try {
+                    zipOut.putNextEntry(new ZipEntry(file.getPath()));
+                    if (!file.isDirectory()) {
+                        if (!file.getName().endsWith(".class") || !modifiedClasses.contains(file.getPath().substring(0, file.getPath().length() - 6))) {
+                            file.copyTo(zipOut);
+                        } else {
+                            ClassWriter writer = new ClassWriter(0);
+                            cachedClasses.get(file.getPath().substring(0, file.getPath().length() - 6)).accept(writer);
+                            zipOut.write(writer.toByteArray());
                         }
-                        zipOut.closeEntry();
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
                     }
-                });
-                zipOut.flush();
-                zipOut.close();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        });
+                    zipOut.closeEntry();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            zipOut.flush();
+            zipOut.close();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
 

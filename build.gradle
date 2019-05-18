@@ -1,11 +1,31 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath "gradle.plugin.com.dorongold.plugins:task-tree:1.3.1" // For debug purposes
+    }
+}
+
 plugins {
     id 'java'
 }
+apply plugin: "com.dorongold.task-tree" // For debug purposes
 
 group 'net.earthcomputer.jomloptimizer'
 version '1.0-SNAPSHOT'
 
 sourceCompatibility = 1.8
+
+sourceSets {
+    testJars {
+    }
+}
+
+configurations {
+    testJarsCompile.extendsFrom compile
+    testJarsRuntime.extendsFrom runtime
+}
 
 repositories {
     mavenCentral()
@@ -16,4 +36,61 @@ dependencies {
     compile 'org.ow2.asm:asm-debug-all:5.2'
     compile 'org.joml:joml:1.9.6'
     testCompile 'junit:junit:4.12'
+    testCompile 'com.google.guava:guava:27.1-jre'
+    testCompileOnly sourceSets.testJars.output
+    testRuntimeOnly files(testJarsTransformedOutput)
+}
+
+task testJarsJar(type: Jar) {
+    from sourceSets.testJars.output
+    destinationDirectory = file(testJarsOutput).parentFile
+    archiveFileName = file(testJarsOutput).name
+}
+
+def prevTask = testJarsJar
+sourceSets.test.java.sourceDirectories.each { dir ->
+    def path = dir.absoluteFile.toPath()
+    dir.eachFileRecurse(groovy.io.FileType.FILES) { file ->
+        def filePath = file.absoluteFile.toPath()
+        if (!path.relativize(filePath).toString().contains('post')) {
+            def taskSuffix = '_' + path.relativize(filePath).toString().replace(File.separator, '_')
+            if (taskSuffix.endsWith('.java')) taskSuffix = taskSuffix.substring(0, taskSuffix.length() - 5)
+            def curPrevTask = prevTask
+            def optimizeTask = task('testOptimize' + taskSuffix, type: Test) {
+                inputs.file(testJarsOutput)
+                filter {
+                    def testName = path.relativize(filePath).toString().replace('.java', '').replace(File.separator, '.')
+                    includeTestsMatching testName
+                }
+                test.dependsOn.each {dependsOn it}
+                dependsOn curPrevTask
+            }
+            def postOptimizeTask = task('testOptimized' + taskSuffix, type: Test) {
+                include 'net/earthcomputer/jomloptimizer/post/**'
+                test.dependsOn.each {dependsOn it}
+                dependsOn optimizeTask
+            }
+            prevTask = postOptimizeTask
+        }
+    }
+}
+
+test {
+    exclude '**'
+    dependsOn prevTask
+}
+
+import org.apache.tools.ant.filters.ReplaceTokens
+
+task processTestSource(type: Copy) {
+    from sourceSets.test.java
+    inputs.property 'inputJar', file(testJarsOutput).absolutePath.replace('\\', '\\\\')
+    inputs.property 'outputJar', file(testJarsTransformedOutput).absolutePath.replace('\\', '\\\\')
+    filter(ReplaceTokens, tokens: [inputJar: file(testJarsOutput).absolutePath.replace('\\', '\\\\'),
+                                   outputJar: file(testJarsTransformedOutput).absolutePath.replace('\\', '\\\\')])
+    into testFilteredSrc
+}
+
+compileTestJava {
+    source = processTestSource.outputs
 }

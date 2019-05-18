@@ -25,6 +25,7 @@ sourceSets {
 configurations {
     testJarsCompile.extendsFrom compile
     testJarsRuntime.extendsFrom runtime
+    inTestJar
 }
 
 repositories {
@@ -33,16 +34,20 @@ repositories {
 
 dependencies {
     compile gradleApi()
-    compile 'org.ow2.asm:asm-debug-all:5.2'
+    compile 'org.ow2.asm:asm:7.1'
+    compile 'org.ow2.asm:asm-commons:7.1'
+    compile 'org.ow2.asm:asm-tree:7.1'
     compile 'org.joml:joml:1.9.6'
     testCompile 'junit:junit:4.12'
     testCompile 'com.google.guava:guava:27.1-jre'
     testCompileOnly sourceSets.testJars.output
     testRuntimeOnly files(testJarsTransformedOutput)
+    inTestJar 'org.joml:joml:1.9.6'
 }
 
 task testJarsJar(type: Jar) {
     from sourceSets.testJars.output
+    from configurations.inTestJar.collect {it.isDirectory() ? it : zipTree(it)}
     destinationDirectory = file(testJarsOutput).parentFile
     archiveFileName = file(testJarsOutput).name
 }

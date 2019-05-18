@@ -1,5 +1,6 @@
 package net.earthcomputer.jomloptimizer;
 
+import groovy.lang.Reference;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.Input;
@@ -32,6 +33,8 @@ public class JomlOptimizerTask extends DefaultTask {
 
     private Map<String, ClassNode> cachedClasses = new HashMap<>();
     private Set<String> modifiedClasses = new HashSet<>();
+
+    private static final Object LOCK = new Object();
 
     @InputFiles
     public FileCollection getInputJars() {
@@ -128,18 +131,18 @@ public class JomlOptimizerTask extends DefaultTask {
     // ===== OPTIMIZATIONS ===== //
 
     private void removeConstants() {
-        cachedClasses.values().forEach(clazz -> {
+        cachedClasses.values().parallelStream().forEach(clazz -> {
             if (!modifyJomlItself && JomlClasses.isJomlClass(clazz.name))
                 return;
             if (JomlClasses.isConstantClass(clazz.name))
                 return;
             ClassNode newClass = new ClassNode();
-            cachedClasses.put(clazz.name, newClass);
+            Reference<Boolean> classModified = new Reference<>(Boolean.FALSE);
             clazz.accept(new ClassRemapper(newClass, new Remapper() {
                 @Override
                 public String map(String typeName) {
                     if (JomlClasses.isConstantClass(typeName)) {
-                        modifiedClasses.add(clazz.name);
+                        classModified.set(Boolean.TRUE);
                         return JomlClasses.getNonConstantClass(typeName);
                     }
                     return typeName;
@@ -161,7 +164,7 @@ public class JomlOptimizerTask extends DefaultTask {
                         public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
                             if (JomlClasses.isJomlClass(owner)) {
                                 if (!modifyJomlItself) {
-                                    mv.visitMethodInsn(opcode, owner, name, desc, itf);
+                                    mv.visitMethodInsn(opcode == Opcodes.INVOKEINTERFACE ? Opcodes.INVOKEVIRTUAL : opcode, remapper.mapType(owner), name, desc, false);
                                     Type returnType = Type.getReturnType(desc);
                                     if (returnType.getSort() == Type.OBJECT && JomlClasses.isConstantClass(returnType.getInternalName())) {
                                         mv.visitTypeInsn(Opcodes.CHECKCAST, "L" + JomlClasses.getNonConstantClass(returnType.getInternalName()) + ";");
@@ -170,6 +173,7 @@ public class JomlOptimizerTask extends DefaultTask {
                                     if (JomlClasses.isConstantClass(owner)) {
                                         String nonConstant = JomlClasses.getNonConstantClass(owner);
                                         if (canUseField(nonConstant, name, desc)) {
+                                            classModified.set(Boolean.TRUE);
                                             mv.visitFieldInsn(Opcodes.GETFIELD, nonConstant, name, Type.getReturnType(desc).getDescriptor());
                                         } else {
                                             super.visitMethodInsn(opcode == Opcodes.INVOKEINTERFACE ? Opcodes.INVOKEVIRTUAL : opcode, owner, name, desc, false);
@@ -198,6 +202,12 @@ public class JomlOptimizerTask extends DefaultTask {
                     };
                 }
             });
+            if (classModified.get()) {
+                synchronized (LOCK) {
+                    modifiedClasses.add(clazz.name);
+                    cachedClasses.put(clazz.name, newClass);
+                }
+            }
         });
     }
 }

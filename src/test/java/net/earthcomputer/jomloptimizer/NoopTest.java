@@ -2,12 +2,11 @@ package net.earthcomputer.jomloptimizer;
 
 import org.junit.Test;
 
-public class RemoveConstantsTest {
+public class NoopTest {
 
     @Test
-    public void testRemoveConstants() {
+    public void testNoop() {
         JomlOptimizerTask task = Common.createTask();
-        task.setRemoveConstants(true);
         task.doOptimize();
     }
 
